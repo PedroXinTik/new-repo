@@ -1,277 +1,1049 @@
-name: Gerar APK do Agente v8
+name: Agente v1.0 - Compilar APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - '.github/workflows/gerar_apk_agente_v8.yml'
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: agente-v1-build
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Construir Agente Android
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 40
 
-      - uses: actions/setup-java@v4
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Criar projeto Android
+      - name: Criar estrutura Android
         shell: bash
         run: |
-          set -e
-          mkdir -p proj/app/src/main/java/com/tomo/agente proj/app/src/main/res/xml proj/app/src/main/res/values
-          cat > proj/settings.gradle <<'EOF'
-          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          set -euo pipefail
+
+          mkdir -p agente/app/src/main/java/com/tomo/agente
+          mkdir -p agente/app/src/main/res/values
+          mkdir -p agente/app/src/main/res/xml
+
+          cd agente
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
           rootProject.name = "Agente"
-          include ":app"
+          include(":app")
           EOF
-          cat > proj/build.gradle <<'EOF'
+
+          cat > build.gradle <<'EOF'
           plugins {
               id 'com.android.application' version '8.5.2' apply false
               id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
           }
           EOF
-          echo 'org.gradle.jvmargs=-Xmx2g' > proj/gradle.properties
-          cat > proj/app/build.gradle <<'EOF'
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+
+          cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
               id 'org.jetbrains.kotlin.android'
           }
+
           android {
               namespace 'com.tomo.agente'
-              compileSdk 34
+              compileSdk 35
+
               defaultConfig {
                   applicationId 'com.tomo.agente'
                   minSdk 30
                   targetSdk 34
-                  versionCode 8
-                  versionName '8.0'
+                  versionCode 1
+                  versionName '1.0'
               }
+
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
-              kotlinOptions { jvmTarget = '17' }
+
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
           }
           EOF
-          cat > proj/app/src/main/AndroidManifest.xml <<'EOF'
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AgenteTheme"
+                  parent="@android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:colorAccent">#8B5CF6</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:statusBarColor">#080B18</item>
+                  <item name="android:navigationBarColor">#080B18</item>
+                  <item name="android:windowBackground">#080B18</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">Agente</string>
+              <string name="accessibility_description">Serviço de acessibilidade do Agente para executar gestos e capturar a tela mediante solicitação do usuário.</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/xml/accessibility_config.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagDefault|flagReportViewIds"
+              android:canPerformGestures="true"
+              android:canTakeScreenshot="true"
+              android:description="@string/accessibility_description"
+              android:notificationTimeout="250" />
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-              <application android:label="Agente v8" android:allowBackup="false" android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+              <application
+                  android:allowBackup="false"
+                  android:label="@string/app_name"
+                  android:theme="@style/AgenteTheme"
+                  android:supportsRtl="true">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
                       <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
-                  <service android:name=".AgenteService" android:exported="true" android:label="Agente" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-                      <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
-                      <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_config"/>
+
+                  <service
+                      android:name=".AgenteService"
+                      android:exported="true"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_config" />
                   </service>
+
+                  <service
+                      android:name=".OverlayService"
+                      android:exported="false"
+                      android:foregroundServiceType="specialUse">
+                      <property
+                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="Botão flutuante acionado pelo usuário para acessar o assistente." />
+                  </service>
+
               </application>
           </manifest>
           EOF
-          cat > proj/app/src/main/res/xml/accessibility_config.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeWindowStateChanged"
-              android:accessibilityFeedbackType="feedbackGeneric"
-              android:accessibilityFlags="flagDefault"
-              android:canPerformGestures="true"
-              android:canTakeScreenshot="true"
-              android:description="@string/desc"
-              android:notificationTimeout="100"/>
-          EOF
-          cat > proj/app/src/main/res/values/strings.xml <<'EOF'
-          <resources><string name="desc">O Agente analisa a tela e executa ações quando solicitado.</string></resources>
-          EOF
-          cat > proj/app/src/main/java/com/tomo/agente/AgenteService.kt <<'EOF'
+
+          cat > app/src/main/java/com/tomo/agente/Database.kt <<'EOF'
           package com.tomo.agente
 
-          import android.accessibilityservice.AccessibilityService
-          import android.accessibilityservice.GestureDescription
+          import android.content.ContentValues
+          import android.content.Context
+          import android.database.sqlite.SQLiteDatabase
+          import android.database.sqlite.SQLiteOpenHelper
+
+          data class MemoryItem(
+              val id: Long,
+              val category: String,
+              val game: String,
+              val content: String,
+              val createdAt: Long
+          )
+
+          class MemoryDatabase(context: Context) :
+              SQLiteOpenHelper(context, "agente_memoria.db", null, 1) {
+
+              override fun onCreate(db: SQLiteDatabase) {
+                  db.execSQL(
+                      """
+                      CREATE TABLE memories (
+                          id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          category TEXT NOT NULL,
+                          game TEXT NOT NULL DEFAULT '',
+                          content TEXT NOT NULL,
+                          created_at INTEGER NOT NULL
+                      )
+                      """.trimIndent()
+                  )
+
+                  db.execSQL(
+                      "CREATE INDEX idx_memories_category ON memories(category)"
+                  )
+
+                  db.execSQL(
+                      "CREATE INDEX idx_memories_game ON memories(game)"
+                  )
+              }
+
+              override fun onUpgrade(
+                  db: SQLiteDatabase,
+                  oldVersion: Int,
+                  newVersion: Int
+              ) {
+                  // Migrações futuras serão adicionadas sem apagar memórias.
+              }
+
+              @Synchronized
+              fun save(
+                  category: String,
+                  content: String,
+                  game: String = ""
+              ): Long {
+                  require(content.isNotBlank()) {
+                      "A memória não pode estar vazia."
+                  }
+
+                  val values = ContentValues().apply {
+                      put("category", category)
+                      put("game", game)
+                      put("content", content.trim())
+                      put("created_at", System.currentTimeMillis())
+                  }
+
+                  return writableDatabase.insert("memories", null, values)
+              }
+
+              @Synchronized
+              fun search(
+                  query: String,
+                  category: String? = null,
+                  game: String? = null,
+                  limit: Int = 30
+              ): List<MemoryItem> {
+                  val conditions = mutableListOf<String>()
+                  val args = mutableListOf<String>()
+
+                  if (query.isNotBlank()) {
+                      conditions += "content LIKE ?"
+                      args += "%${query.trim()}%"
+                  }
+
+                  if (category != null) {
+                      conditions += "category = ?"
+                      args += category
+                  }
+
+                  if (game != null) {
+                      conditions += "game = ?"
+                      args += game
+                  }
+
+                  val where = if (conditions.isEmpty()) {
+                      ""
+                  } else {
+                      "WHERE " + conditions.joinToString(" AND ")
+                  }
+
+                  val result = mutableListOf<MemoryItem>()
+
+                  readableDatabase.rawQuery(
+                      """
+                      SELECT id, category, game, content, created_at
+                      FROM memories
+                      $where
+                      ORDER BY created_at DESC
+                      LIMIT ?
+                      """.trimIndent(),
+                      (args + limit.coerceIn(1, 100).toString()).toTypedArray()
+                  ).use { cursor ->
+                      while (cursor.moveToNext()) {
+                          result += MemoryItem(
+                              id = cursor.getLong(0),
+                              category = cursor.getString(1),
+                              game = cursor.getString(2),
+                              content = cursor.getString(3),
+                              createdAt = cursor.getLong(4)
+                          )
+                      }
+                  }
+
+                  return result
+              }
+
+              @Synchronized
+              fun deleteMemory(id: Long): Boolean {
+                  return writableDatabase.delete(
+                      "memories",
+                      "id = ?",
+                      arrayOf(id.toString())
+                  ) > 0
+              }
+
+              @Synchronized
+              fun count(): Int {
+                  readableDatabase.rawQuery(
+                      "SELECT COUNT(*) FROM memories",
+                      null
+                  ).use { cursor ->
+                      return if (cursor.moveToFirst()) cursor.getInt(0) else 0
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tomo/agente/AgenteTheme.kt <<'EOF'
+          package com.tomo.agente
+
+          import android.graphics.drawable.GradientDrawable
+
+          object AgenteTheme {
+              const val BACKGROUND = 0xFF080B18.toInt()
+              const val PANEL = 0xFF11172B.toInt()
+              const val BLUE = 0xFF00C8FF.toInt()
+              const val PURPLE = 0xFF9D4DFF.toInt()
+              const val TEXT = 0xFFF4F6FF.toInt()
+              const val MUTED = 0xFFB7BED5.toInt()
+
+              fun neonGradient(): GradientDrawable {
+                  return GradientDrawable(
+                      GradientDrawable.Orientation.LEFT_RIGHT,
+                      intArrayOf(BLUE, PURPLE, BLUE)
+                  ).apply {
+                      cornerRadius = 28f
+                  }
+              }
+
+              fun panelBackground(): GradientDrawable {
+                  return GradientDrawable(
+                      GradientDrawable.Orientation.TL_BR,
+                      intArrayOf(0xFF17233D.toInt(), PANEL, 0xFF24153D.toInt())
+                  ).apply {
+                      cornerRadius = 28f
+                      setStroke(2, PURPLE)
+                  }
+              }
+          }
+          EOF
+
+                    cat > agente/app/src/main/java/com/tomo/agente/GeminiClient.kt <<'EOF'
+          package com.tomo.agente
+
+          import android.graphics.Bitmap
+          import android.util.Base64
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.io.ByteArrayOutputStream
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.nio.charset.StandardCharsets
+
+          object GeminiClient {
+
+              private const val MODEL = "gemini-2.5-flash"
+
+              fun perguntar(
+                  apiKey: String,
+                  prompt: String,
+                  memories: List<MemoryItem> = emptyList(),
+                  screenshot: Bitmap? = null
+              ): String {
+
+                  require(apiKey.isNotBlank()) {
+                      "A chave da API Gemini não foi configurada."
+                  }
+
+                  require(prompt.isNotBlank()) {
+                      "Digite uma pergunta ou comando."
+                  }
+
+                  val contextoMemoria = if (memories.isEmpty()) {
+                      "Nenhuma memória relevante foi encontrada."
+                  } else {
+                      memories.joinToString("\n") {
+                          val jogo = if (it.game.isNotBlank()) {
+                              " | Jogo: ${it.game}"
+                          } else {
+                              ""
+                          }
+
+                          "[${it.category}$jogo] ${it.content}"
+                      }
+                  }
+
+                  val instrucoes = """
+                      Você é o Agente, um assistente inteligente que conversa
+                      em português brasileiro.
+
+                      Seja claro, educado e objetivo.
+                      Ajude o usuário a compreender aplicativos e jogos.
+                      Não afirme que executou uma ação se ela não foi realizada.
+                      Não invente informações sobre a tela.
+                      Se não tiver certeza, explique a incerteza.
+
+                      MEMÓRIAS RECUPERADAS:
+                      $contextoMemoria
+
+                      SOLICITAÇÃO DO USUÁRIO:
+                      $prompt
+
+                      Se o usuário compartilhar uma captura de tela,
+                      analise apenas os elementos que conseguir identificar.
+                      Sugira ações seguras e explique o que pretende fazer.
+                  """.trimIndent()
+
+                  val parts = JSONArray()
+                      .put(JSONObject().put("text", instrucoes))
+
+                  if (screenshot != null) {
+                      val bitmap = reduzirImagem(screenshot)
+                      val output = ByteArrayOutputStream()
+
+                      try {
+                          bitmap.compress(
+                              Bitmap.CompressFormat.JPEG,
+                              75,
+                              output
+                          )
+
+                          val encoded = Base64.encodeToString(
+                              output.toByteArray(),
+                              Base64.NO_WRAP
+                          )
+
+                          parts.put(
+                              JSONObject()
+                                  .put(
+                                      "inline_data",
+                                      JSONObject()
+                                          .put("mime_type", "image/jpeg")
+                                          .put("data", encoded)
+                                  )
+                          )
+                      } finally {
+                          output.close()
+
+                          if (bitmap !== screenshot) {
+                              bitmap.recycle()
+                          }
+                      }
+                  }
+
+                  val requestBody = JSONObject()
+                      .put(
+                          "contents",
+                          JSONArray().put(
+                              JSONObject()
+                                  .put("role", "user")
+                                  .put("parts", parts)
+                          )
+                      )
+                      .put(
+                          "generationConfig",
+                          JSONObject()
+                              .put("temperature", 0.4)
+                              .put("maxOutputTokens", 1500)
+                      )
+
+                  val endpoint =
+                      "https://generativelanguage.googleapis.com/v1beta/models/" +
+                      "$MODEL:generateContent"
+
+                  val connection =
+                      URL(endpoint).openConnection() as HttpURLConnection
+
+                  try {
+                      connection.requestMethod = "POST"
+                      connection.connectTimeout = 20000
+                      connection.readTimeout = 45000
+                      connection.doOutput = true
+
+                      connection.setRequestProperty(
+                          "Content-Type",
+                          "application/json; charset=UTF-8"
+                      )
+
+                      connection.setRequestProperty(
+                          "x-goog-api-key",
+                          apiKey
+                      )
+
+                      connection.outputStream.use { stream ->
+                          stream.write(
+                              requestBody.toString()
+                                  .toByteArray(StandardCharsets.UTF_8)
+                          )
+                      }
+
+                      val status = connection.responseCode
+
+                      val responseStream =
+                          if (status in 200..299) {
+                              connection.inputStream
+                          } else {
+                              connection.errorStream
+                          }
+
+                      val response = responseStream
+                          ?.bufferedReader(StandardCharsets.UTF_8)
+                          ?.use { it.readText() }
+                          .orEmpty()
+
+                      if (status !in 200..299) {
+                          val detail = try {
+                              JSONObject(response)
+                                  .optJSONObject("error")
+                                  ?.optString("message")
+                          } catch (_: Exception) {
+                              null
+                          }
+
+                          throw IllegalStateException(
+                              "Erro Gemini HTTP $status: " +
+                              (detail ?: response.take(250))
+                          )
+                      }
+
+                      val root = JSONObject(response)
+
+                      val candidates =
+                          root.optJSONArray("candidates")
+                              ?: throw IllegalStateException(
+                                  "A Gemini não retornou uma resposta válida."
+                              )
+
+                      val candidate = candidates.optJSONObject(0)
+                          ?: throw IllegalStateException(
+                              "A resposta da Gemini está vazia."
+                          )
+
+                      val content = candidate.optJSONObject("content")
+                          ?: throw IllegalStateException(
+                              "Não foi possível ler a resposta."
+                          )
+
+                      val responseParts =
+                          content.optJSONArray("parts")
+                              ?: throw IllegalStateException(
+                                  "A resposta não contém texto."
+                              )
+
+                      val answer = StringBuilder()
+
+                      for (index in 0 until responseParts.length()) {
+                          val item = responseParts.optJSONObject(index)
+                          val text = item?.optString("text").orEmpty()
+
+                          if (text.isNotBlank()) {
+                              if (answer.isNotEmpty()) {
+                                  answer.append('\n')
+                              }
+
+                              answer.append(text)
+                          }
+                      }
+
+                      return answer.toString().ifBlank {
+                          "A Gemini não retornou texto legível."
+                      }
+
+                  } finally {
+                      connection.disconnect()
+                  }
+              }
+
+              private fun reduzirImagem(source: Bitmap): Bitmap {
+                  val maiorLado = maxOf(source.width, source.height)
+
+                  if (maiorLado <= 1280) {
+                      return source
+                  }
+
+                  val escala = 1280f / maiorLado
+
+                  return Bitmap.createScaledBitmap(
+                      source,
+                      (source.width * escala).toInt().coerceAtLeast(1),
+                      (source.height * escala).toInt().coerceAtLeast(1),
+                      true
+                  )
+              }
+          }
+          EOF
+
+                    cat > agente/app/src/main/java/com/tomo/agente/VoiceManager.kt <<'EOF'
+          package com.tomo.agente
+
+          import android.content.Context
           import android.content.Intent
-          import android.graphics.Path
           import android.os.Bundle
           import android.speech.RecognitionListener
           import android.speech.RecognizerIntent
           import android.speech.SpeechRecognizer
           import android.speech.tts.TextToSpeech
-          import android.view.Display
-          import android.view.accessibility.AccessibilityEvent
-          import android.widget.Toast
+          import android.speech.tts.UtteranceProgressListener
           import java.util.Locale
-          import java.util.concurrent.CountDownLatch
-          import java.util.concurrent.TimeUnit
 
-          class AgenteService : AccessibilityService() {
-              companion object {
-                  var instance: AgenteService? = null
-                  @Volatile var running = false
+          class VoiceManager(
+              private val context: Context,
+              private val onRecognized: (String) -> Unit,
+              private val onStatus: (String) -> Unit
+          ) : TextToSpeech.OnInitListener {
+
+              private var recognizer: SpeechRecognizer? = null
+              private var tts: TextToSpeech? = null
+              private var ttsReady = false
+              private var listening = false
+
+              init {
+                  tts = TextToSpeech(context.applicationContext, this)
               }
 
-              private var tts: TextToSpeech? = null
-              private var recognizer: SpeechRecognizer? = null
+              override fun onInit(status: Int) {
+                  if (status == TextToSpeech.SUCCESS) {
+                      val result = tts?.setLanguage(Locale("pt", "BR"))
+                      ttsReady =
+                          result != TextToSpeech.LANG_MISSING_DATA &&
+                          result != TextToSpeech.LANG_NOT_SUPPORTED
 
-              override fun onServiceConnected() {
-                  instance = this
-                  tts = TextToSpeech(this) {
-                      if (it == TextToSpeech.SUCCESS) {
-                          tts?.language = Locale("pt", "BR")
+                      if (ttsReady) {
+                          tts?.setSpeechRate(1.0f)
+                          onStatus("Voz do Agente pronta.")
+                      } else {
+                          onStatus("Português não está disponível no mecanismo de voz.")
                       }
+                  } else {
+                      onStatus("Não foi possível iniciar a voz do Android.")
                   }
               }
 
-              override fun onDestroy() {
-                  running = false
-                  recognizer?.destroy()
-                  tts?.shutdown()
-                  instance = null
-                  super.onDestroy()
-              }
+              fun falar(texto: String) {
+                  if (texto.isBlank()) return
 
-              override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-              override fun onInterrupt() {}
-
-              fun speak(s: String) {
-                  tts?.speak(s, TextToSpeech.QUEUE_FLUSH, null, "agente")
-              }
-
-              fun startVoice() {
-                  if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-                      toast("Voz indisponível.")
+                  if (!ttsReady || tts == null) {
+                      onStatus("A voz ainda está sendo preparada.")
                       return
                   }
 
-                  recognizer?.destroy()
-                  recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+                  val textoSeguro = texto.take(3500)
 
-                  recognizer?.setRecognitionListener(object : RecognitionListener {
-                      override fun onReadyForSpeech(p: Bundle?) {
-                          speak("Pode falar.")
-                      }
-
-                      override fun onBeginningOfSpeech() {}
-                      override fun onRmsChanged(v: Float) {}
-                      override fun onBufferReceived(b: ByteArray?) {}
-                      override fun onEndOfSpeech() {}
-                      override fun onPartialResults(p: Bundle?) {}
-                      override fun onEvent(t: Int, p: Bundle?) {}
-
-                      override fun onError(e: Int) {
-                          toast("Não entendi. Tente novamente.")
-                      }
-
-                      override fun onResults(r: Bundle?) {
-                          val text = r?.getStringArrayList(
-                              SpeechRecognizer.RESULTS_RECOGNITION
-                          )?.firstOrNull().orEmpty()
-
-                          if (text.isNotBlank()) {
-                              speak("Ouvi: $text. A automação com inteligência artificial ainda precisa ser conectada à API.")
-                          }
-                      }
-                  })
-
-                  val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                  i.putExtra(
-                      RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                      RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                  )
-                  i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
-                  recognizer?.startListening(i)
-              }
-
-              fun hold(x: Float, y: Float, ms: Long) {
-                  val path = Path().apply { moveTo(x, y) }
-                  val stroke = GestureDescription.StrokeDescription(
-                      path, 0, ms.coerceIn(300L, 20_000L)
-                  )
-                  dispatchGesture(
-                      GestureDescription.Builder().addStroke(stroke).build(),
-                      null,
-                      null
+                  tts?.speak(
+                      textoSeguro,
+                      TextToSpeech.QUEUE_FLUSH,
+                      Bundle(),
+                      "agente-${System.currentTimeMillis()}"
                   )
               }
 
-              fun screenshot(callback: (Boolean) -> Unit) {
-                  takeScreenshot(
-                      Display.DEFAULT_DISPLAY,
-                      mainExecutor,
-                      object : TakeScreenshotCallback {
-                          override fun onSuccess(result: ScreenshotResult) {
-                              result.hardwareBuffer.close()
-                              callback(true)
-                          }
-
-                          override fun onFailure(errorCode: Int) {
-                              callback(false)
-                          }
-                      }
-                  )
+              fun pararFala() {
+                  tts?.stop()
               }
 
-              private fun toast(s: String) {
-                  android.os.Handler(mainLooper).post {
-                      Toast.makeText(this, s, Toast.LENGTH_LONG).show()
-                  }
-              }
-          }
-          EOF
-          cat > proj/app/src/main/java/com/tomo/agente/MainActivity.kt <<'EOF'
-          package com.tomo.agente
-
-          import android.app.Activity
-          import android.content.Intent
-          import android.net.Uri
-          import android.os.Bundle
-          import android.provider.Settings
-          import android.view.ViewGroup
-          import android.widget.Button
-          import android.widget.LinearLayout
-          import android.widget.TextView
-          import android.widget.Toast
-
-          class MainActivity : Activity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-
-                  val root = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      setPadding(32, 60, 32, 32)
+              fun iniciarEscuta() {
+                  if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                      onStatus("Reconhecimento de voz indisponível neste aparelho.")
+                      return
                   }
 
-                  root.addView(TextView(this).apply {
-                      text = "Agente v8\n\nBase inicial Android: reconhecimento de voz, serviço de acessibilidade e gesto de segurar até 20 segundos. A integração com IA, o avatar 3D e a autonomia em segundo plano ainda precisam ser implementados."
-                      textSize = 18f
-                  })
+                  pararEscuta()
 
-                  fun add(label: String, action: () -> Unit) {
-                      root.addView(
-                          Button(this).apply {
-                              text = label
-                              setOnClickListener { action() }
-                          },
-                          ViewGroup.LayoutParams.MATCH_PARENT,
-                          ViewGroup.LayoutParams.WRAP_CONTENT
+                  recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+
+                  recognizer?.setRecognitionListener(
+                      object : RecognitionListener {
+
+                          override fun onReadyForSpeech(params: Bundle?) {
+                              listening = true
+                              onStatus("Pode falar, paizão.")
+                          }
+
+                          override fun onBeginningOfSpeech() {}
+
+                          override fun onRmsChanged(rmsdB: Float) {}
+
+                          override fun onBufferReceived(buffer: ByteArray?) {}
+
+                          override fun onEndOfSpeech() {
+                              listening = false
+                              onStatus("Processando sua fala…")
+                          }
+
+                          override fun onError(error: Int) {
+                              listening = false
+
+                              val message = when (error) {
+                                  SpeechRecognizer.ERROR_AUDIO ->
+                                      "Erro ao acessar o áudio."
+                                  SpeechRecognizer.ERROR_NETWORK ->
+                                      "Problema de conexão durante o reconhecimento."
+                                  SpeechRecognizer.ERROR_NO_MATCH ->
+                                      "Não consegui entender. Tente novamente."
+                                  SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                                      "Não detectei fala."
+                                  SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                                      "O microfone não tem permissão."
+                                  else ->
+                                      "O reconhecimento de voz falhou. Tente novamente."
+                              }
+
+                              onStatus(message)
+                          }
+
+                          override fun onResults(results: Bundle?) {
+                              listening = false
+
+                              val matches = results?.getStringArrayList(
+                                  SpeechRecognizer.RESULTS_RECOGNITION
+                              )
+
+                              val phrase = matches?.firstOrNull()?.trim()
+
+                              if (!phrase.isNullOrBlank()) {
+                                  onRecognized(phrase)
+                              } else {
+                                  onStatus("Nenhuma frase foi reconhecida.")
+                              }
+                          }
+
+                          override fun onPartialResults(
+                              partialResults: Bundle?
+                          ) {}
+
+                          override fun onEvent(
+                              eventType: Int,
+                              params: Bundle?
+                          ) {}
+                      }
+                  )
+
+                  val intent = Intent(
+                      RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+                  ).apply {
+                      putExtra(
+                          RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                          RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                      )
+
+                      putExtra(
+                          RecognizerIntent.EXTRA_LANGUAGE,
+                          "pt-BR"
+                      )
+
+                      putExtra(
+                          RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,
+                          "pt-BR"
+                      )
+
+                      putExtra(
+                          RecognizerIntent.EXTRA_MAX_RESULTS,
+                          3
+                      )
+
+                      putExtra(
+                          RecognizerIntent.EXTRA_PARTIAL_RESULTS,
+                          false
                       )
                   }
 
-                  add("Permitir sobre outros apps") {
+                  try {
+                      recognizer?.startListening(intent)
+                  } catch (e: Exception) {
+                      listening = false
+                      onStatus("Não foi possível iniciar a escuta: ${e.message}")
+                  }
+              }
+
+              fun pararEscuta() {
+                  listening = false
+
+                  try {
+                      recognizer?.cancel()
+                      recognizer?.destroy()
+                  } catch (_: Exception) {
+                  }
+
+                  recognizer = null
+              }
+
+              fun estaEscutando(): Boolean = listening
+
+              fun destruir() {
+                  pararEscuta()
+
+                  try {
+                      tts?.stop()
+                      tts?.shutdown()
+                  } catch (_: Exception) {
+                  }
+
+                  tts = null
+                  ttsReady = false
+              }
+          }
+          EOF
+          cat > agente/app/src/main/java/com/tomo/agente/MainActivity.kt <<'EOF'
+          package com.tomo.agente
+
+          import android.Manifest
+          import android.app.Activity
+          import android.content.Intent
+          import android.content.SharedPreferences
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
+          import android.net.Uri
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.view.Gravity
+          import android.view.View
+          import android.view.ViewGroup
+          import android.view.inputmethod.InputMethodManager
+          import android.content.Context
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.LinearLayout
+          import android.widget.ScrollView
+          import android.widget.TextView
+          import android.widget.Toast
+          import java.util.concurrent.Executors
+
+          class MainActivity : Activity() {
+
+              private lateinit var prefs: SharedPreferences
+              private lateinit var memoria: MemoryDatabase
+              private lateinit var chave: EditText
+              private lateinit var pergunta: EditText
+              private lateinit var resposta: TextView
+              private lateinit var status: TextView
+              private lateinit var voz: VoiceManager
+
+              private val executor = Executors.newSingleThreadExecutor()
+
+              private var ultimaPergunta = ""
+              private var imagem: android.graphics.Bitmap? = null
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  prefs = getSharedPreferences("agente_config", MODE_PRIVATE)
+                  memoria = MemoryDatabase(this)
+
+                  voz = VoiceManager(
+                      this,
+                      onRecognized = { frase ->
+                          runOnUiThread {
+                              pergunta.setText(frase)
+                              enviarPergunta()
+                          }
+                      },
+                      onStatus = { mensagem ->
+                          runOnUiThread {
+                              status.text = mensagem
+                          }
+                      }
+                  )
+
+                  montarInterface()
+              }
+
+              private fun montarInterface() {
+                  val scroll = ScrollView(this).apply {
+                      setBackgroundColor(AgenteTheme.BACKGROUND)
+                      fillViewport = true
+                  }
+
+                  val layout = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER_HORIZONTAL
+                      setPadding(20, 28, 20, 28)
+                  }
+
+                  val titulo = TextView(this).apply {
+                      text = "A G E N T E"
+                      textSize = 29f
+                      setTextColor(AgenteTheme.BLUE)
+                      typeface = Typeface.DEFAULT_BOLD
+                      gravity = Gravity.CENTER
+                  }
+
+                  layout.addView(
+                      titulo,
+                      LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      )
+                  )
+
+                  val subtitulo = TextView(this).apply {
+                      text = "INTELIGÊNCIA • MEMÓRIA • AUTOMAÇÃO"
+                      textSize = 11f
+                      gravity = Gravity.CENTER
+                      setTextColor(AgenteTheme.PURPLE)
+                      setPadding(0, 8, 0, 22)
+                  }
+
+                  layout.addView(subtitulo)
+
+                  val painel = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      background = AgenteTheme.panelBackground()
+                      setPadding(18, 18, 18, 18)
+                  }
+
+                  painel.addView(TextView(this).apply {
+                      text = "NÚCLEO DE INTELIGÊNCIA"
+                      textSize = 16f
+                      typeface = Typeface.DEFAULT_BOLD
+                      setTextColor(AgenteTheme.TEXT)
+                  })
+
+                  status = TextView(this).apply {
+                      text = "Inicializando o Agente..."
+                      textSize = 13f
+                      setTextColor(AgenteTheme.BLUE)
+                      setPadding(0, 10, 0, 16)
+                  }
+
+                  painel.addView(status)
+
+                  chave = EditText(this).apply {
+                      hint = "Chave da API Gemini"
+                      setSingleLine(true)
+                      setText(prefs.getString("gemini_key", ""))
+                      setTextColor(Color.WHITE)
+                      setHintTextColor(AgenteTheme.MUTED)
+                      background = campoBackground()
+                  }
+
+                  painel.addView(campoComMargem(chave))
+
+                  pergunta = EditText(this).apply {
+                      hint = "Digite seu comando..."
+                      minLines = 2
+                      maxLines = 5
+                      gravity = Gravity.TOP
+                      setTextColor(Color.WHITE)
+                      setHintTextColor(AgenteTheme.MUTED)
+                      background = campoBackground()
+                  }
+
+                  painel.addView(campoComMargem(pergunta))
+
+                  adicionarBotao(
+                      painel,
+                      "SALVAR CHAVE GEMINI",
+                      AgenteTheme.PURPLE
+                  ) {
+                      val key = chave.text.toString().trim()
+
+                      if (key.isBlank()) {
+                          informar("Digite a chave antes de salvar.")
+                      } else {
+                          prefs.edit().putString("gemini_key", key).apply()
+                          informar("Chave salva neste aparelho.")
+                      }
+                  }
+
+                  adicionarBotao(
+                      painel,
+                      "ENVIAR COMANDO À IA",
+                      AgenteTheme.BLUE
+                  ) {
+                      enviarPergunta()
+                  }
+
+                  adicionarBotao(
+                      painel,
+                      "🎙 FALAR COM O AGENTE",
+                      AgenteTheme.PURPLE
+                  ) {
+                      if (
+                          checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                          != PackageManager.PERMISSION_GRANTED
+                      ) {
+                          requestPermissions(
+                              arrayOf(Manifest.permission.RECORD_AUDIO),
+                              101
+                          )
+                      } else {
+                          voz.iniciarEscuta()
+                      }
+                  }
+
+                  adicionarBotao(
+                      painel,
+                      "PARAR ESCUTA",
+                      0xFF343B54.toInt()
+                  ) {
+                      voz.pararEscuta()
+                      informar("Escuta interrompida.")
+                  }
+
+                  adicionarBotao(
+                      painel,
+                      "ATIVAR ACESSIBILIDADE",
+                      AgenteTheme.PURPLE
+                  ) {
+                      startActivity(
+                          Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                      )
+                  }
+
+                  adicionarBotao(
+                      painel,
+                      "PERMITIR BOTÃO FLUTUANTE",
+                      AgenteTheme.BLUE
+                  ) {
                       startActivity(
                           Intent(
                               Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -280,56 +1052,698 @@ jobs:
                       )
                   }
 
-                  add("Ativar acessibilidade") {
-                      startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                  adicionarBotao(
+                      painel,
+                      "MEMÓRIA PERMANENTE",
+                      AgenteTheme.PURPLE
+                  ) {
+                      abrirMemoria("permanente")
                   }
 
-                  add("Falar com o Agente") {
-                      val service = AgenteService.instance
-                      if (service == null) {
-                          Toast.makeText(
-                              this,
-                              "Ative o serviço em Acessibilidade primeiro.",
-                              Toast.LENGTH_LONG
-                          ).show()
-                      } else {
-                          service.startVoice()
+                  adicionarBotao(
+                      painel,
+                      "MEMÓRIA DE JOGOS",
+                      AgenteTheme.BLUE
+                  ) {
+                      abrirMemoria("jogo")
+                  }
+
+                  adicionarBotao(
+                      painel,
+                      "FALAR ÚLTIMA RESPOSTA",
+                      AgenteTheme.PURPLE
+                  ) {
+                      voz.falar(resposta.text.toString())
+                  }
+
+                  layout.addView(
+                      painel,
+                      LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      )
+                  )
+
+                  resposta = TextView(this).apply {
+                      text = "Olá! Configure a Gemini para começar."
+                      textSize = 16f
+                      setTextColor(AgenteTheme.TEXT)
+                      setPadding(8, 22, 8, 22)
+                  }
+
+                  layout.addView(resposta)
+
+                  scroll.addView(layout)
+                  setContentView(scroll)
+
+                  status.text = "Sistema inicializado."
+              }
+
+              private fun campoBackground(): GradientDrawable {
+                  return GradientDrawable().apply {
+                      setColor(0xFF090E20.toInt())
+                      cornerRadius = 18f
+                      setStroke(2, AgenteTheme.PURPLE)
+                  }
+              }
+
+              private fun campoComMargem(view: View): View {
+                  return view.apply {
+                      setPadding(14, 12, 14, 12)
+                  }.also {
+                      it.layoutParams = LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      ).apply {
+                          bottomMargin = 12
+                      }
+                  }
+              }
+
+              private fun adicionarBotao(
+                  parent: LinearLayout,
+                  texto: String,
+                  cor: Int,
+                  acao: () -> Unit
+              ) {
+                  val botao = Button(this).apply {
+                      text = texto
+                      textSize = 13f
+                      setTextColor(Color.WHITE)
+                      isAllCaps = false
+
+                      background = GradientDrawable().apply {
+                          setColor(0xFF11182C.toInt())
+                          cornerRadius = 20f
+                          setStroke(2, cor)
+                      }
+
+                      setOnClickListener {
+                          acao()
                       }
                   }
 
-                  add("Testar captura de tela") {
-                      val service = AgenteService.instance
-                      if (service == null) {
-                          Toast.makeText(
-                              this,
-                              "Ative Acessibilidade primeiro.",
-                              Toast.LENGTH_LONG
-                          ).show()
-                      } else {
-                          service.screenshot { ok ->
-                              runOnUiThread {
-                                  Toast.makeText(
-                                      this,
-                                      if (ok) "Captura autorizada." else "Falha na captura.",
-                                      Toast.LENGTH_LONG
-                                  ).show()
-                              }
+                  parent.addView(
+                      botao,
+                      LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      ).apply {
+                          bottomMargin = 9
+                      }
+                  )
+              }
+
+              private fun enviarPergunta() {
+                  val key = chave.text.toString().trim()
+                  val texto = pergunta.text.toString().trim()
+
+                  if (key.isBlank()) {
+                      informar("Configure a chave da Gemini primeiro.")
+                      return
+                  }
+
+                  if (texto.isBlank()) {
+                      informar("Digite ou fale alguma coisa.")
+                      return
+                  }
+
+                  prefs.edit().putString("gemini_key", key).apply()
+                  ultimaPergunta = texto
+                  status.text = "Consultando a inteligência artificial..."
+
+                  executor.execute {
+                      try {
+                          val encontrados = memoria.search(
+                              query = texto,
+                              limit = 12
+                          )
+
+                          val resultado = GeminiClient.perguntar(
+                              apiKey = key,
+                              prompt = texto,
+                              memories = encontrados,
+                              screenshot = imagem
+                          )
+
+                          runOnUiThread {
+                              resposta.text = resultado
+                              status.text = "Resposta recebida."
+                              voz.falar(resultado)
+                          }
+                      } catch (e: Exception) {
+                          runOnUiThread {
+                              status.text = "Erro na consulta."
+                              resposta.text =
+                                  "Não consegui consultar a Gemini: " +
+                                  (e.message ?: "erro desconhecido")
                           }
                       }
                   }
+              }
 
-                  setContentView(root)
+              private fun abrirMemoria(categoria: String) {
+                  val entrada = EditText(this).apply {
+                      hint = if (categoria == "jogo") {
+                          "Jogo e informação para guardar"
+                      } else {
+                          "Informação permanente para guardar"
+                      }
+                      setTextColor(Color.WHITE)
+                  }
+
+                  val container = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(24, 12, 24, 12)
+                      addView(entrada)
+                  }
+
+                  android.app.AlertDialog.Builder(this)
+                      .setTitle(
+                          if (categoria == "jogo") {
+                              "Memória de jogos"
+                          } else {
+                              "Memória permanente"
+                          }
+                      )
+                      .setView(container)
+                      .setPositiveButton("Salvar") { _, _ ->
+                          val texto = entrada.text.toString().trim()
+
+                          if (texto.isNotBlank()) {
+                              val jogo = if (categoria == "jogo") {
+                                  "Roblox"
+                              } else {
+                                  ""
+                              }
+
+                              executor.execute {
+                                  try {
+                                      memoria.save(
+                                          category = categoria,
+                                          content = texto,
+                                          game = jogo
+                                      )
+
+                                      runOnUiThread {
+                                          informar("Memória salva no aparelho.")
+                                      }
+                                  } catch (e: Exception) {
+                                      runOnUiThread {
+                                          informar("Erro ao salvar memória.")
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                      .setNegativeButton("Cancelar", null)
+                      .show()
+              }
+
+              private fun informar(texto: String) {
+                  Toast.makeText(
+                      this,
+                      texto,
+                      Toast.LENGTH_LONG
+                  ).show()
+              }
+
+              override fun onDestroy() {
+                  voz.destruir()
+                  executor.shutdownNow()
+                  imagem?.recycle()
+                  imagem = null
+                  super.onDestroy()
               }
           }
           EOF
 
-      - name: Compilar APK
-        working-directory: proj
-        run: gradle assembleDebug --no-daemon
+                    cat > agente/app/src/main/java/com/tomo/agente/AgenteService.kt <<'EOF'
+          package com.tomo.agente
 
-      - name: Publicar APK para download
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: agente-v8-${{ github.run_number }}
-          name: Agente v8 build ${{ github.run_number }}
-          files: proj/app/build/outputs/apk/debug/app-debug.apk
+          import android.accessibilityservice.AccessibilityService
+          import android.accessibilityservice.GestureDescription
+          import android.graphics.Bitmap
+          import android.graphics.Path
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.Display
+          import android.view.accessibility.AccessibilityEvent
+          import java.util.concurrent.Executor
+
+          class AgenteService : AccessibilityService() {
+
+              companion object {
+                  @Volatile
+                  var instance: AgenteService? = null
+                      private set
+              }
+
+              private val mainHandler = Handler(Looper.getMainLooper())
+
+              override fun onServiceConnected() {
+                  super.onServiceConnected()
+                  instance = this
+              }
+
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+                  // Os eventos não são enviados automaticamente para a internet.
+              }
+
+              override fun onInterrupt() {
+                  // O Android pode interromper o serviço.
+              }
+
+              override fun onDestroy() {
+                  if (instance === this) {
+                      instance = null
+                  }
+                  super.onDestroy()
+              }
+
+              fun tocar(
+                  x: Float,
+                  y: Float,
+                  duracaoMs: Long = 100L,
+                  callback: (Boolean) -> Unit = {}
+              ) {
+                  val largura = resources.displayMetrics.widthPixels.toFloat()
+                  val altura = resources.displayMetrics.heightPixels.toFloat()
+
+                  if (x < 0 || y < 0 || x >= largura || y >= altura) {
+                      callback(false)
+                      return
+                  }
+
+                  val caminho = Path().apply {
+                      moveTo(x, y)
+                      lineTo(x + 1f, y + 1f)
+                  }
+
+                  val gesto = GestureDescription.Builder()
+                      .addStroke(
+                          GestureDescription.StrokeDescription(
+                              caminho,
+                              0L,
+                              duracaoMs.coerceIn(50L, 20_000L)
+                          )
+                      )
+                      .build()
+
+                  val aceito = dispatchGesture(
+                      gesto,
+                      object : GestureResultCallback() {
+                          override fun onCompleted(
+                              gestureDescription: GestureDescription?
+                          ) {
+                              callback(true)
+                          }
+
+                          override fun onCancelled(
+                              gestureDescription: GestureDescription?
+                          ) {
+                              callback(false)
+                          }
+                      },
+                      mainHandler
+                  )
+
+                  if (!aceito) {
+                      callback(false)
+                  }
+              }
+
+              fun arrastar(
+                  xInicial: Float,
+                  yInicial: Float,
+                  xFinal: Float,
+                  yFinal: Float,
+                  duracaoMs: Long = 500L,
+                  callback: (Boolean) -> Unit = {}
+              ) {
+                  val largura = resources.displayMetrics.widthPixels.toFloat()
+                  val altura = resources.displayMetrics.heightPixels.toFloat()
+
+                  val coordenadasValidas =
+                      xInicial in 0f..largura &&
+                      xFinal in 0f..largura &&
+                      yInicial in 0f..altura &&
+                      yFinal in 0f..altura
+
+                  if (!coordenadasValidas) {
+                      callback(false)
+                      return
+                  }
+
+                  val caminho = Path().apply {
+                      moveTo(xInicial, yInicial)
+                      lineTo(xFinal, yFinal)
+                  }
+
+                  val gesto = GestureDescription.Builder()
+                      .addStroke(
+                          GestureDescription.StrokeDescription(
+                              caminho,
+                              0L,
+                              duracaoMs.coerceIn(100L, 20_000L)
+                          )
+                      )
+                      .build()
+
+                  val aceito = dispatchGesture(
+                      gesto,
+                      object : GestureResultCallback() {
+                          override fun onCompleted(
+                              gestureDescription: GestureDescription?
+                          ) {
+                              callback(true)
+                          }
+
+                          override fun onCancelled(
+                              gestureDescription: GestureDescription?
+                          ) {
+                              callback(false)
+                          }
+                      },
+                      mainHandler
+                  )
+
+                  if (!aceito) {
+                      callback(false)
+                  }
+              }
+
+              fun capturarTela(callback: (Bitmap?) -> Unit) {
+                  val executor = Executor { command ->
+                      mainHandler.post(command)
+                  }
+
+                  try {
+                      takeScreenshot(
+                          Display.DEFAULT_DISPLAY,
+                          executor,
+                          object : TakeScreenshotCallback {
+
+                              override fun onSuccess(
+                                  result: ScreenshotResult
+                              ) {
+                                  try {
+                                      val hardwareBuffer = result.hardwareBuffer
+
+                                      val bitmapHardware =
+                                          Bitmap.wrapHardwareBuffer(
+                                              hardwareBuffer,
+                                              result.colorSpace
+                                          )
+
+                                      hardwareBuffer.close()
+
+                                      val copia = bitmapHardware?.copy(
+                                          Bitmap.Config.ARGB_8888,
+                                          false
+                                      )
+
+                                      callback(copia)
+                                  } catch (_: Exception) {
+                                      try {
+                                          result.hardwareBuffer.close()
+                                      } catch (_: Exception) {
+                                      }
+
+                                      callback(null)
+                                  }
+                              }
+
+                              override fun onFailure(errorCode: Int) {
+                                  callback(null)
+                              }
+                          }
+                      )
+                  } catch (_: Exception) {
+                      callback(null)
+                  }
+              }
+          }
+          EOF
+
+                    cat > agente/app/src/main/java/com/tomo/agente/OverlayService.kt <<'EOF'
+          package com.tomo.agente
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.Service
+          import android.content.Intent
+          import android.graphics.Color
+          import android.graphics.PixelFormat
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
+          import android.os.Build
+          import android.os.IBinder
+          import android.provider.Settings
+          import android.view.Gravity
+          import android.view.MotionEvent
+          import android.view.View
+          import android.view.WindowManager
+          import android.widget.TextView
+
+          class OverlayService : Service() {
+
+              private lateinit var windowManager: WindowManager
+              private var floatingButton: TextView? = null
+              private var layoutParams: WindowManager.LayoutParams? = null
+
+              companion object {
+                  const val ACTION_START =
+                      "com.tomo.agente.OVERLAY_START"
+
+                  const val ACTION_STOP =
+                      "com.tomo.agente.OVERLAY_STOP"
+
+                  const val CHANNEL_ID = "agente_assistente"
+                  const val NOTIFICATION_ID = 808
+              }
+
+              override fun onCreate() {
+                  super.onCreate()
+                  windowManager =
+                      getSystemService(WINDOW_SERVICE) as WindowManager
+              }
+
+              override fun onStartCommand(
+                  intent: Intent?,
+                  flags: Int,
+                  startId: Int
+              ): Int {
+                  when (intent?.action) {
+                      ACTION_STOP -> {
+                          removerBotao()
+                          stopForeground(STOP_FOREGROUND_REMOVE)
+                          stopSelf()
+                          return START_NOT_STICKY
+                      }
+                  }
+
+                  if (!Settings.canDrawOverlays(this)) {
+                      stopSelf()
+                      return START_NOT_STICKY
+                  }
+
+                  if (!iniciarNotificacao()) {
+                      stopSelf()
+                      return START_NOT_STICKY
+                  }
+
+                  mostrarBotao()
+                  return START_NOT_STICKY
+              }
+
+              private fun iniciarNotificacao(): Boolean {
+                  return try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          val channel = NotificationChannel(
+                              CHANNEL_ID,
+                              "Agente em execução",
+                              NotificationManager.IMPORTANCE_LOW
+                          ).apply {
+                              description =
+                                  "Notificação do botão flutuante do Agente"
+                          }
+
+                          val manager =
+                              getSystemService(NotificationManager::class.java)
+
+                          manager.createNotificationChannel(channel)
+                      }
+
+                      val notification = if (
+                          Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                      ) {
+                          Notification.Builder(this, CHANNEL_ID)
+                      } else {
+                          @Suppress("DEPRECATION")
+                          Notification.Builder(this)
+                      }
+                          .setSmallIcon(
+                              android.R.drawable.ic_dialog_info
+                          )
+                          .setContentTitle("Agente")
+                          .setContentText(
+                              "Botão flutuante ativado pelo usuário"
+                          )
+                          .setOngoing(true)
+                          .build()
+
+                      startForeground(NOTIFICATION_ID, notification)
+                      true
+                  } catch (_: Exception) {
+                      false
+                  }
+              }
+
+              private fun mostrarBotao() {
+                  if (floatingButton != null) return
+
+                  val button = TextView(this).apply {
+                      text = "A"
+                      textSize = 23f
+                      gravity = Gravity.CENTER
+                      typeface = Typeface.DEFAULT_BOLD
+                      setTextColor(Color.WHITE)
+
+                      background = GradientDrawable(
+                          GradientDrawable.Orientation.TL_BR,
+                          intArrayOf(
+                              AgenteTheme.BLUE,
+                              AgenteTheme.PURPLE
+                          )
+                      ).apply {
+                          shape = GradientDrawable.OVAL
+                          setStroke(3, Color.WHITE)
+                      }
+
+                      contentDescription =
+                          "Botão flutuante para abrir o Agente"
+
+                      elevation = 12f
+                  }
+
+                  val params = WindowManager.LayoutParams(
+                      dp(60),
+                      dp(60),
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      } else {
+                          @Suppress("DEPRECATION")
+                          WindowManager.LayoutParams.TYPE_PHONE
+                      },
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = dp(16)
+                      y = dp(180)
+                  }
+
+                  var initialX = 0
+                  var initialY = 0
+                  var initialTouchX = 0f
+                  var initialTouchY = 0f
+                  var moved = false
+
+                  button.setOnTouchListener { view, event ->
+                      when (event.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              initialX = params.x
+                              initialY = params.y
+                              initialTouchX = event.rawX
+                              initialTouchY = event.rawY
+                              moved = false
+                              true
+                          }
+
+                          MotionEvent.ACTION_MOVE -> {
+                              val dx = event.rawX - initialTouchX
+                              val dy = event.rawY - initialTouchY
+
+                              if (kotlin.math.abs(dx) > dp(8) ||
+                                  kotlin.math.abs(dy) > dp(8)) {
+                                  moved = true
+                              }
+
+                              params.x = initialX + dx.toInt()
+                              params.y = initialY + dy.toInt()
+
+                              try {
+                                  windowManager.updateViewLayout(
+                                      view,
+                                      params
+                                  )
+                              } catch (_: Exception) {
+                              }
+
+                              true
+                          }
+
+                          MotionEvent.ACTION_UP -> {
+                              if (!moved) {
+                                  abrirAgente()
+                              }
+                              true
+                          }
+
+                          else -> false
+                      }
+                  }
+
+                  try {
+                      windowManager.addView(button, params)
+                      floatingButton = button
+                      layoutParams = params
+                  } catch (_: Exception) {
+                      floatingButton = null
+                      layoutParams = null
+                  }
+              }
+
+              private fun abrirAgente() {
+                  val intent = Intent(this, MainActivity::class.java).apply {
+                      addFlags(
+                          Intent.FLAG_ACTIVITY_NEW_TASK or
+                              Intent.FLAG_ACTIVITY_SINGLE_TOP
+                      )
+                  }
+
+                  try {
+                      startActivity(intent)
+                  } catch (_: Exception) {
+                  }
+              }
+
+              private fun removerBotao() {
+                  val button = floatingButton ?: return
+
+                  try {
+                      windowManager.removeView(button)
+                  } catch (_: Exception) {
+                  }
+
+                  floatingButton = null
+                  layoutParams = null
+              }
+
+              private fun dp(value: Int): Int {
+                  return (value * resources.displayMetrics.density).toInt()
+              }
+
+              override fun onDestroy() {
+                  removerBotao()
+                  super.onDestroy()
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+          }
+          EOF
+          
+          
